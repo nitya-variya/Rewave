@@ -151,6 +151,13 @@
             pointer-events: none;
         }
 
+        /* 3D pour layer: section backgrounds are painted BEHIND the WebGL canvas (z2 < z5) by #rw-bgs, so the
+           bottle / waterfall / liquid film render over the section colour but UNDER every card, photo, text and bubble (z10). */
+        #rw-bgs { position: absolute; top: 0; left: 0; width: 100%; height: 0; z-index: 2; pointer-events: none; }
+        #rw-bgs .rw-bg { position: absolute; left: 0; width: 100%; }
+        #rituals { background: transparent !important; }
+        #transparency.formulation-physics-section { background-color: transparent !important; }
+
         /* Floating Minimal Navigation */
         nav.nav-ui {
             position: fixed;
@@ -1224,7 +1231,7 @@
             }
         }
 
-        @media (max-width: 768px) {
+        @media (max-width: 768px), (max-width: 1024px) and (orientation: portrait) {
             .story-b-section {
                 height: 100vh;
                 min-height: 100vh;
@@ -1535,6 +1542,13 @@
                 radial-gradient(circle at 50% 50%, transparent 50%, rgba(4, 14, 9, 0.55) 85%, #05130C 100%);
             pointer-events: none;
             z-index: 1;
+        }
+
+        @media (min-width: 769px) and (max-width: 1024px) and (orientation: portrait) {
+            .formulation-physics-section {
+                min-height: 700px;
+                height: clamp(700px, 72vh, 800px);
+            }
         }
 
         /* Restrained Floor-like Grounding Surface */
@@ -2112,7 +2126,7 @@
             margin-top: calc(-0.38 * (724 / 2172 * 100cqw) + 40px);
         }
 
-        @media (max-width: 768px) {
+        @media (max-width: 768px), (max-width: 1024px) and (orientation: portrait) {
             .footer-content {
                 margin-top: calc(-0.38 * (724 / 940 * 100cqw) + 40px);
             }
@@ -2343,7 +2357,7 @@
         }
 
         /* Responsive Breakpoint (768px) */
-        @media (max-width: 768px) {
+        @media (max-width: 768px), (max-width: 1024px) and (orientation: portrait) {
             .footer-headline-wrap {
                 margin-bottom: 3.5rem;
             }
@@ -2483,7 +2497,7 @@
             overflow: hidden;
         }
 
-        @media (max-width: 768px) {
+        @media (max-width: 768px), (max-width: 1024px) and (orientation: portrait) {
             .sidebar-watermark {
                 transform: translate(calc(50% - 28px), -50%) rotate(90deg);
                 width: clamp(480px, 72vh, 680px);
@@ -2757,7 +2771,7 @@
         }
 
         /* --- Standard Mobile (<= 768px) --- */
-        @media (max-width: 768px) {
+        @media (max-width: 768px), (max-width: 1024px) and (orientation: portrait) {
 
             /* Navigation */
             nav.nav-ui {
@@ -3547,7 +3561,7 @@
             }
         }
 
-        @media (max-width: 768px) {
+        @media (max-width: 768px), (max-width: 1024px) and (orientation: portrait) {
             .rituals-section-ref {
                 padding: 3.8rem 1.25rem 4rem;
             }
@@ -3682,7 +3696,8 @@
     </style>
 
     <!-- REWAVE Self-Contained Assets (Zero-CORS offline & file:/// execution) -->
-    <script src="rewave_assets.js"></script>
+    <link rel="preload" href="assets/rewave_bottle.opt.glb" as="fetch" crossorigin>
+    <link rel="preload" href="rewave_label_ultra_4k.png" as="image">
 
     <!-- Standalone Three.js r160 + GLTFLoader + RoomEnvironment Bundle (Zero-CORS offline & file:/// execution) -->
     <script src="three_bundle.min.js"></script>
@@ -3717,6 +3732,7 @@
 
     <!-- 3D WebGL Canvas Layer -->
     <div id="webgl-container"></div>
+    <div id="rw-bgs" aria-hidden="true"></div>
 
     <!-- EDITORIAL OFF-CANVAS OVERLAY -->
     <div class="menu-overlay" id="menu-overlay" aria-hidden="true">
@@ -4419,7 +4435,7 @@
             <!-- Full Width Landscape Artwork -->
             <div class="footer-landscape-container">
                 <picture class="footer-landscape-picture">
-                    <source media="(max-width: 768px)" srcset="assets/img/footer-landscape-mobile.webp" width="940" height="724">
+                    <source media="(max-width: 768px), (max-width: 1024px) and (orientation: portrait)" srcset="assets/img/footer-landscape-mobile.webp" width="940" height="724">
                     <img src="assets/img/footer-landscape.webp" alt="" aria-hidden="true" width="2172" height="724" loading="lazy" class="footer-landscape-img">
                 </picture>
             </div>
@@ -4869,9 +4885,15 @@
         const scene = new THREE.Scene();
 
         // Responsive Device Mode & Coordinate System
+        // Phone layout = phones AND portrait tablets (same stacked layout as the CSS above)
+        function rwPhoneLayout() {
+            const w = window.innerWidth, h = window.innerHeight;
+            return w < 768 || (w <= 1024 && h > w);
+        }
+
         function getDeviceMode() {
             const w = window.innerWidth;
-            if (w < 768) return 'mobile';
+            if (rwPhoneLayout()) return 'mobile';
             if (w <= 1024) return 'tablet';
             return 'desktop';
         }
@@ -4911,6 +4933,18 @@
             return 0.85;
         }
 
+        // Hero: the bottle's VISIBLE outline is centred between the two cursive notes on every screen size.
+        let heroCorrX = 0, heroCorrY = 0, storyACorrY = 0;     // world-unit corrections measured from the real silhouette (see measureHeroCorr)
+        const rwSpace = { hero: null, storyA: null };         // free vertical space (px) the bottle must be centred in, per stacked layout
+        function getHeroTargetScreenX() {
+            const a = document.querySelector('.note-kiwi'), b = document.querySelector('.note-sugar');
+            if (!a || !b) return null;
+            const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+            if (!ra.width || !rb.width) return null;
+            const L = ra.left <= rb.left ? ra : rb, R = ra.left <= rb.left ? rb : ra;
+            return (L.right + R.left) / 2;   // middle of the GAP between the notes: equal breathing room to each note on every screen
+        }
+
         function getStageCoordinates() {
             const w = window.innerWidth;
             const h = window.innerHeight;
@@ -4928,7 +4962,8 @@
             const calloutsEl = document.querySelector('.product-callouts');
             if (calloutsEl && mode !== 'mobile' && !(mode === 'tablet' && aspect < 1.0)) {
                 const rect = calloutsEl.getBoundingClientRect();
-                const targetScreenX = rect.left + rect.width * 0.52;
+                const noteMid = getHeroTargetScreenX();
+                const targetScreenX = noteMid !== null ? noteMid : rect.left + rect.width * 0.52;
                 const targetScreenY = h * 0.50;
 
                 const ndcX = (targetScreenX / w) * 2 - 1;
@@ -4937,10 +4972,12 @@
                 heroX = Number((ndcX * halfWidth).toFixed(3));
                 heroY = Number((ndcY * halfHeight).toFixed(3));
             } else if (mode === 'mobile') {
-                heroX = 0.0;
+                const noteMidM = getHeroTargetScreenX();
+                heroX = noteMidM !== null ? ((noteMidM / w) * 2 - 1) * halfWidth : 0.0;
                 heroY = 0.72; /* Slid up so bottle sits cleanly above headline */
             } else if (mode === 'tablet' && aspect < 1.0) {
-                heroX = 0.0;
+                const noteMidT = getHeroTargetScreenX();
+                heroX = noteMidT !== null ? ((noteMidT / w) * 2 - 1) * halfWidth : 0.0;
                 heroY = 0.52;
             } else {
                 const contentWidth = Math.min(w * 0.9, 1540);
@@ -4956,16 +4993,56 @@
                 heroY = Number((ndcY * halfHeight).toFixed(3));
             }
 
+            // Stacked layout (headline under the bottle): size and place the bottle inside the free space above the headline
+            let heroS = 1;
+            const hlEl = document.querySelector('.headline-column');
+            const coEl = document.querySelector('.product-callouts');
+            if (hlEl && coEl) {
+                const hr = hlEl.getBoundingClientRect(), cr = coEl.getBoundingClientRect();
+                if (hr.top > cr.top + cr.height * 0.6) {
+                    const navEl = document.getElementById('main-nav');
+                    const topY = (navEl ? navEl.getBoundingClientRect().bottom : 70) + 8;
+                    const botY = hr.top + (window.scrollY || 0) - 10;
+                    const avail = Math.max(140, botY - topY);
+                    const pxPerUnit = h / (2 * halfHeight);
+                    const fullPx = 2.61 * (getResponsiveBottleScale() / 0.038) * pxPerUnit * 1.1;   // bottle height incl. its slight tilt
+                    heroS = Math.max(0.45, Math.min(1, (avail * 0.96) / fullPx));
+                    heroY = -((((topY + botY) / 2) / h) * 2 - 1) * halfHeight + heroCorrY;
+                    rwSpace.hero = { topY, botY };
+                } else { rwSpace.hero = null; }
+            }
+            heroX = Number((heroX + heroCorrX).toFixed(3));
+
             let storyAX = (mode === 'mobile' || (mode === 'tablet' && aspect < 1.0)) ? 0.0 : 1.25;
             let storyAY = (mode === 'mobile') ? 0.56 : (mode === 'tablet' && aspect < 1.0 ? 0.38 : 0.0);
+
+            let storyAS = 1;
+            rwSpace.storyA = null;
+            if (mode === 'mobile') {
+                const secA = document.getElementById('matrix');
+                const titleA = secA && secA.querySelector('.section-title');
+                const stmts = secA ? [...secA.querySelectorAll('.statement-item')] : [];
+                if (titleA && stmts.length) {
+                    const sr = secA.getBoundingClientRect();
+                    const topY = titleA.getBoundingClientRect().bottom - sr.top;
+                    const botY = Math.min(...stmts.map((e) => e.getBoundingClientRect().top - sr.top));   // highest card = the bottle never touches any of them
+                    if (botY - topY > 150) {
+                        const pxPerUnitA = h / (2 * halfHeight);
+                        const fullPxA = 2.61 * (getResponsiveBottleScale() / 0.038) * pxPerUnitA * 1.06;
+                        storyAS = Math.max(0.5, Math.min(1, ((botY - topY - 28) * 0.96) / fullPxA));
+                        storyAY = -((((topY + botY) / 2) / h) * 2 - 1) * halfHeight + storyACorrY;
+                        rwSpace.storyA = { topY, botY };
+                    }
+                }
+            }
 
             let storyBX = 0.0;
             let storyBY = (mode === 'mobile') ? 0.44 : (mode === 'tablet' && aspect < 1.0 ? 0.28 : -0.22);
 
             return {
-                hero: { x: heroX, y: heroY },
+                hero: { x: heroX, y: heroY, s: heroS },
                 storyATravel: { startX: heroX, endX: storyAX, startY: heroY, endY: storyAY },
-                storyA: { x: storyAX, y: storyAY },
+                storyA: { x: storyAX, y: storyAY, s: storyAS },
                 storyB: { x: storyBX, y: storyBY },
                 ritualsDrop: -5.5
             };
@@ -4982,7 +5059,7 @@
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.05;
         renderer.shadowMap.enabled = true;
@@ -5210,6 +5287,8 @@
             bottleFloatGroup.add(root);
 
             setupInteractiveMotion();
+            requestAnimationFrame(() => handleResize());
+            if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => handleResize());
             async function initPourRig() {
             try {
                 let PourClass = window.RewavePour;
@@ -5224,10 +5303,35 @@
                     capMesh: capMeshRoot,
                     juiceMesh: juiceMeshRoot,
                     rigUrl: 'assets/pour/rewave_pour_rig.json',
-                    liquidUrl: 'assets/pour/liquid_frames', // Future liquid integration hook
-                    loadLiquid: false // Fail-soft, disabled until liquid files exist
+                    liquidUrl: 'assets/pour/liquid_frames',
+                    loadLiquid: true, // fail-soft: page keeps working if the liquid sequence is missing
+                    deferLiquid: true, // the 14 MB liquid sequence downloads in idle time, never blocking first paint
+                    // Kiwi-cucumber drink: very pale green tint, clear dielectric, soft controlled highlights (no glow, no neon)
+                    // identical drink look to the juice inside the bottle (matLiquid), thickness converted to world units
+                    liquidMaterial: (() => {
+                        // Kiwi-cucumber wellness drink: same green family as the juice in the bottle, luminous (not clear "water"),
+                        // partly translucent so it stays readable on both the light Rituals and the dark Formulation backgrounds
+                        return new THREE.MeshPhysicalMaterial({
+                            color: 0xb9dc7e,
+                            transmission: 0.55,
+                            ior: matLiquid.ior,
+                            roughness: 0.08,
+                            metalness: 0,
+                            thickness: matLiquid.thickness * getResponsiveBottleScale(),
+                            attenuationColor: new THREE.Color(0x9cc95e),
+                            attenuationDistance: 3.0,
+                            emissive: new THREE.Color(0x3c5e22),
+                            emissiveIntensity: 0.5,
+                            envMapIntensity: matLiquid.envMapIntensity,
+                            transparent: true,
+                            depthWrite: false
+                        });
+                    })()
                 });
                 await pourPlayer.load();
+                computePourJourney();
+                const startLiquid = () => pourPlayer.loadLiquidSequence();
+                if ('requestIdleCallback' in window) requestIdleCallback(startLiquid, { timeout: 4000 }); else setTimeout(startLiquid, 2500);
                 window.__rewave = {
                     pour: pourPlayer,
                     setProgress: (p) => {
@@ -5245,7 +5349,6 @@
                         return res;
                     }
                 };
-                console.log('RewavePour rig loaded successfully');
             } catch (err) {
                 console.error('Failed to initialize RewavePour:', err);
             }
@@ -5324,7 +5427,7 @@
                     productGroup.position.y = curY;
                     productGroup.rotation.z = (1 - p) * (-0.05);
                     productGroup.rotation.x = (1 - p) * (0.06);
-                    productGroup.scale.set(1, 1, 1);
+                    { const hs = (currentCoords.hero && currentCoords.hero.s) || 1, sa = (currentCoords.storyA && currentCoords.storyA.s) || 1; productGroup.scale.setScalar(hs + p * (sa - hs)); }
                     productGroup.visible = true;
                     if (bottleMeshRoot) {
                         const bScale = getResponsiveBottleScale();
@@ -5353,7 +5456,7 @@
                 id: 'matrix-pin',
                 trigger: '#matrix',
                 start: 'top top',
-                end: () => (window.innerWidth < 768 ? '+=1800' : '+=2400'),
+                end: () => (rwPhoneLayout() ? '+=1800' : '+=2400'),
                 pin: true,
                 scrub: true,
                 invalidateOnRefresh: true,
@@ -5365,7 +5468,7 @@
                     productGroup.position.y = currentCoords.storyA.y;
                     productGroup.rotation.z = 0;
                     productGroup.rotation.x = 0;
-                    productGroup.scale.set(1, 1, 1);
+                    productGroup.scale.setScalar((currentCoords.storyA && currentCoords.storyA.s) || 1);
                     productGroup.visible = true;
                     if (bottleMeshRoot) {
                         const bScale = getResponsiveBottleScale();
@@ -5421,11 +5524,33 @@
             ];
             const isReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+            // Theme hand-over (bone -> forest green) as soon as the Release section starts to enter, so the section is never an empty light page
+            const rwDarkTheme = () => {
+                if (stageBg) stageBg.style.backgroundColor = 'var(--forest-green)';
+                document.documentElement.style.setProperty('--stage-fg', 'var(--warm-bone)');
+                document.documentElement.style.setProperty('--stage-fg-muted', 'rgba(243, 239, 230, 0.82)');
+                document.documentElement.style.setProperty('--stage-border', 'rgba(243, 239, 230, 0.16)');
+            };
+            const rwLightTheme = () => {
+                if (stageBg) stageBg.style.backgroundColor = 'var(--warm-bone)';
+                document.documentElement.style.setProperty('--stage-fg', 'var(--forest-green)');
+                document.documentElement.style.setProperty('--stage-fg-muted', 'rgba(18, 38, 28, 0.78)');
+                document.documentElement.style.setProperty('--stage-border', 'rgba(18, 38, 28, 0.14)');
+            };
+            ScrollTrigger.create({
+                trigger: '#release',
+                start: 'top 92%',
+                end: 'top top',
+                invalidateOnRefresh: true,
+                onEnter: rwDarkTheme,
+                onLeaveBack: rwLightTheme
+            });
+
             ScrollTrigger.create({
                 id: 'release-pin',
                 trigger: '#release',
                 start: 'top top',
-                end: () => (window.innerWidth < 768 ? '+=1800' : '+=2200'),
+                end: () => (rwPhoneLayout() ? '+=1800' : '+=2200'),
                 pin: true,
                 scrub: true,
                 invalidateOnRefresh: true,
@@ -5434,7 +5559,7 @@
                     const p = self.progress;
 
                     // Dynamic rich dark theme flood
-                    if (p >= 0.15) {
+                    if (p >= 0) {
                         if (stageBg) stageBg.style.backgroundColor = 'var(--forest-green)';
                         document.documentElement.style.setProperty('--stage-fg', 'var(--warm-bone)');
                         document.documentElement.style.setProperty('--stage-fg-muted', 'rgba(243, 239, 230, 0.82)');
@@ -5448,8 +5573,8 @@
 
                     // Headline Accent: "THE RAW MATRIX." appears smoothly
                     if (storyBAccent) {
-                        if (p >= 0.18) {
-                            const accentProgress = Math.min(1, (p - 0.18) / 0.15);
+                        if (p >= 0.03) {
+                            const accentProgress = Math.min(1, (p - 0.03) / 0.10);
                             if (isReducedMotion()) {
                                 storyBAccent.style.opacity = '1';
                                 storyBAccent.style.transform = 'none';
@@ -5498,22 +5623,17 @@
                             productGroup.position.x = startX + centerProgress * (targetX - startX);
                             productGroup.position.y = startY + centerProgress * (targetY - startY);
                             productGroup.position.z = 0;
+                            { const sa2 = (currentCoords.storyA && currentCoords.storyA.s) || 1; productGroup.scale.setScalar(sa2 + centerProgress * (1 - sa2)); }
                         } else if (p >= 0.12 && p < 0.16) {
                             // Hold rest pose at center stage before break-free
                             pourPlayer.setFrame(1);
-                        } else if (p >= 0.16 && p < 0.86) {
-                            // Active pour playback: scrub frame 12 (cap unscrew) to frame 130 (pour angle 118°)
-                            const pourProgress = (p - 0.16) / 0.70;
-                            const rigFrame = 12 + pourProgress * (130 - 12);
+                        } else if (p >= 0.16) {
+                            // Cap unscrew (f12) -> pouring pose (f130); holds at f130 until the page journey takes over
+                            const ease = (x) => x * x * (3 - 2 * x);
+                            const rigFrame = p < 0.46
+                                ? 12 + ((p - 0.16) / 0.30) * (84 - 12)                       // cap unscrew -> anticipation pause
+                                : 84 + ease(Math.min(1, (p - 0.46) / 0.48)) * (130 - 84);    // slow, weighted tilt to the pouring pose
                             pourPlayer.setFrame(rigFrame);
-                        } else if (p >= 0.86 && p < 0.94) {
-                            // Hold pour pose
-                            pourPlayer.setFrame(130);
-                        } else if (p >= 0.94) {
-                            // Seamless 0.06 blend into Rituals rest pose (avoids visual pop on handoff)
-                            const rawBlend = (p - 0.94) / 0.06;
-                            const smoothBlend = rawBlend * rawBlend * (3 - 2 * rawBlend);
-                            pourPlayer.blendToRest(130, smoothBlend);
                         }
                     } else {
                         // Fallback before rig async load completes
@@ -5523,7 +5643,7 @@
                     }
 
                     // Staggered sequential illumination of the 4 Deconstruction Hotspots
-                    if (window.innerWidth < 768) {
+                    if (rwPhoneLayout()) {
                         // Mobile: Step-by-step single card activation below the upper bottle
                         const mobileActiveIdx = p < 0.26 ? 0 : (p < 0.50 ? 1 : (p < 0.74 ? 2 : 3));
                         deconstructNodes.forEach((node, idx) => {
@@ -5544,7 +5664,7 @@
                         });
                     } else {
                         // Desktop: 2-column reveal surrounding center 3D bottle
-                        const nodeThresholds = [0.20, 0.36, 0.54, 0.72];
+                        const nodeThresholds = [0.03, 0.15, 0.27, 0.39];
                         deconstructNodes.forEach((node, idx) => {
                             if (!node) return;
                             const thresh = nodeThresholds[idx];
@@ -5654,10 +5774,59 @@
         }
 
         // --- 8. RESIZE & FLUID DYNAMICS TICKER ---
+        function measureHeroCorr() {
+            if (!bottleMeshRoot) return;
+            let shell = null;
+            bottleMeshRoot.traverse((c) => { if (c.isMesh && c.name.includes('BottlePlastic')) shell = c; });
+            if (!shell) return;
+            const w = window.innerWidth, hgt = window.innerHeight;
+            const coords = cachedStageCoordinates;
+            const halfH = Math.tan((30 * Math.PI / 180) / 2) * camera.position.z, halfW = halfH * (w / hgt);
+            const bs = getResponsiveBottleScale();
+            const sp = productGroup.position.clone(), sr = productGroup.rotation.clone(), ss = productGroup.scale.clone();
+            const fp = bottleFloatGroup.position.clone(), fr = bottleFloatGroup.rotation.clone();
+            const cx = camera.position.x, cy = camera.position.y;
+            camera.position.x = 0; camera.position.y = 0;
+            camera.aspect = w / hgt; camera.updateProjectionMatrix(); camera.updateMatrixWorld(true);
+            bottleFloatGroup.position.set(0, 0, 0); bottleFloatGroup.rotation.set(0, 0, 0);
+            bottleMeshRoot.scale.setScalar(bs);
+            const pos = shell.geometry.attributes.position, v = new THREE.Vector3();
+            // visible outline (px) of the bottle in a given pose; the cap sits ~1.2 local units above the shell
+            const outline = (x, y, s, rx, ry, rz) => {
+                productGroup.position.set(x, y, 0); productGroup.rotation.set(rx, ry, rz); productGroup.scale.setScalar(s);
+                productGroup.updateMatrixWorld(true);
+                let mnX = Infinity, mxX = -Infinity, mnY = Infinity, mxY = -Infinity;
+                for (let i = 0; i < pos.count; i++) {
+                    v.fromBufferAttribute(pos, i).applyMatrix4(shell.matrixWorld).project(camera);
+                    if (v.x < mnX) mnX = v.x; if (v.x > mxX) mxX = v.x; if (v.y < mnY) mnY = v.y; if (v.y > mxY) mxY = v.y;
+                }
+                const capPx = 1.2 * bs * s * (hgt / (2 * halfH));
+                return { cx: (((mnX + mxX) / 2) + 1) / 2 * w, top: (1 - mxY) / 2 * hgt - capPx, bottom: (1 - mnY) / 2 * hgt };
+            };
+            // horizontal: centre the hero outline in the gap between the two cursive notes
+            const target = getHeroTargetScreenX();
+            const hero = outline(coords.hero.x, coords.hero.y, coords.hero.s || 1, 0.06, 0.12, -0.05);
+            if (target !== null) heroCorrX += -((hero.cx - target) / w) * 2 * halfW;
+            // vertical: equal space above and below the bottle (stacked layouts)
+            if (rwSpace.hero) {
+                const dTop = hero.top - rwSpace.hero.topY, dBot = rwSpace.hero.botY - hero.bottom;
+                heroCorrY += ((dTop - dBot) / 2) * (2 * halfH / hgt);
+            }
+            if (rwSpace.storyA) {
+                const a = outline(coords.storyA.x, coords.storyA.y, coords.storyA.s || 1, 0, 0, 0);
+                const dTop = a.top - rwSpace.storyA.topY, dBot = rwSpace.storyA.botY - a.bottom;
+                storyACorrY += ((dTop - dBot) / 2) * (2 * halfH / hgt);
+            }
+            productGroup.position.copy(sp); productGroup.rotation.copy(sr); productGroup.scale.copy(ss);
+            bottleFloatGroup.position.copy(fp); bottleFloatGroup.rotation.copy(fr);
+            camera.position.x = cx; camera.position.y = cy; camera.updateMatrixWorld(true);
+            window.__rwHeroLast = { targetPx: target === null ? null : Math.round(target), outlineCenterPx: Math.round(hero.cx), heroGapTop: Math.round(hero.top - (rwSpace.hero ? rwSpace.hero.topY : 0)), corrX: +heroCorrX.toFixed(3), corrY: +heroCorrY.toFixed(3), storyACorrY: +storyACorrY.toFixed(3) };
+        }
+
         function handleResize() {
             const w = window.innerWidth;
             const h = window.innerHeight;
-            const currentCoords = updateCachedCoordinates();
+            let currentCoords = updateCachedCoordinates();
             const camZ = getResponsiveCameraZ();
             const bScale = getResponsiveBottleScale();
             const rScale = getResponsiveOrbitScale();
@@ -5669,6 +5838,8 @@
 
             if (bottleMeshRoot) {
                 bottleMeshRoot.scale.set(bScale, bScale, bScale);
+                measureHeroCorr(); currentCoords = updateCachedCoordinates();     // two passes: the outline centre converges onto the notes' midpoint
+                measureHeroCorr(); currentCoords = updateCachedCoordinates();
             }
 
             if (orbitRing && orbitRing2) {
@@ -5678,7 +5849,7 @@
 
             // Only reposition to hero defaults if user is near top of page
             if (window.scrollY < 80) {
-                productGroup.scale.set(1, 1, 1);
+                productGroup.scale.setScalar(currentCoords.hero.s || 1);
                 productGroup.visible = true;
                 productGroup.position.x = currentCoords.hero.x;
                 productGroup.position.y = currentCoords.hero.y;
@@ -5687,7 +5858,9 @@
                 orbitRing2.position.x = currentCoords.hero.x;
                 orbitRing2.position.y = currentCoords.hero.y;
                 shadowPlane.position.x = currentCoords.hero.x;
-                shadowPlane.position.y = currentCoords.hero.y - (34.8 * bScale);
+                shadowPlane.position.y = currentCoords.hero.y - (34.8 * bScale * (currentCoords.hero.s || 1));
+                orbitRing.scale.set(rScale * (currentCoords.hero.s || 1), rScale * (currentCoords.hero.s || 1), rScale * (currentCoords.hero.s || 1));
+                orbitRing2.scale.set(rScale * (currentCoords.hero.s || 1), rScale * (currentCoords.hero.s || 1), rScale * (currentCoords.hero.s || 1));
             }
 
             ScrollTrigger.refresh();
@@ -5705,6 +5878,135 @@
         let sloshRotX = 0;
         let sloshVelZ = 0;
         let sloshVelX = 0;
+
+
+        // --- WATER POOL: full-width translucent water body at the bottom of Formulation (bubbles float in it) ---
+        // Lives in the 3D scene (z5): over the section colour, under bubbles / text (DOM z10). Surface level == splash floor.
+        // --- POUR JOURNEY: after the release pin, the SAME pour continues through Everyday Rhythm into Formulation ---
+        // Pure function of scrollY (scrub-safe both ways). Camera pan == page scroll of the Blender master timeline.
+        const POUR_J = { R1: 0, S1: 0, camEnd: -6.15, active: false, dBottom: 200, floorY: -7.15, fs: 0, lastT: 0 };
+        function computePourJourney() {
+            const st = (typeof ScrollTrigger !== 'undefined') ? ScrollTrigger.getById('release-pin') : null;
+            const tr = document.getElementById('transparency');
+            if (!st || !tr) return;
+            POUR_J.R1 = st.end;
+            const r = tr.getBoundingClientRect();
+            POUR_J.S1 = Math.max(POUR_J.R1 + 300, r.bottom + (window.scrollY || 0) - window.innerHeight);
+            const cont = document.getElementById('formulation-bubble-container');
+            POUR_J.dBottom = cont ? Math.max(0, r.bottom - cont.getBoundingClientRect().bottom) : 200;   // px between bubble floor and section bottom
+        }
+        // Narrow / portrait screens: slide the camera right (as the bottle tilts) so the stream lands inside the viewport, not off its edge
+        function applyPourCameraX() {
+            if (!pourPlayer || !pourPlayer.rig) return;
+            const f = pourPlayer.currentFrame || 1;
+            const t = Math.min(1, Math.max(0, (f - 100) / 30));
+            const w = t * t * (3 - 2 * t);
+            const k = getResponsiveBottleScale() / 0.038;
+            const aspect = window.innerWidth / window.innerHeight;
+            const halfW = Math.tan((30 * Math.PI / 180) / 2) * camera.position.z * aspect;
+            const dx = Math.max(0, 2.4 * k - 0.86 * halfW);
+            camera.position.x = dx * w;
+        }
+        function updatePourJourney() {
+            if (!pourPlayer || !pourPlayer.rig) return;
+            const y = window.scrollY || 0;
+            if (y <= POUR_J.R1 || POUR_J.S1 <= POUR_J.R1) {
+                if (POUR_J.active) {            // scrolled back into the pinned release: hand control back to its trigger
+                    POUR_J.active = false;
+                    POUR_J.wasActive = false;
+                    camera.position.y = 0;
+                    pourPlayer.worldScale = 1;
+                    if (pourPlayer.mesh) pourPlayer.mesh.visible = false;
+                }
+                return;
+            }
+            POUR_J.active = true;
+            const k = getResponsiveBottleScale() / 0.038;   // bottle scale vs authoring scale -> whole pour world scales with it
+            pourPlayer.worldScale = k;
+            const vh = window.innerHeight;
+            const pxPerUnit = vh / (2 * Math.tan((30 * Math.PI / 180) / 2) * camera.position.z);
+            const span = POUR_J.S1 - POUR_J.R1;
+            // The bottle is STUCK to the Release section: from the end of the pin the camera pans exactly with the page (1:1), so the bottle
+            // and cap scroll away together with that section. Only the waterfall remains; it is lengthened so that it still hangs from the
+            // Release section all the way to the bottom edge of the bubble section (the neck sits at mid-screen at the end of the pin).
+            const lengthUnits = (span + 0.5 * vh) / pxPerUnit;
+            const stretchMax = Math.max(1, 1.12 * lengthUnits / (7.0 * k));
+            let frame, ramp;
+            if (y <= POUR_J.S1) {
+                const sN = (y - POUR_J.R1) / span;
+                frame = sN < 0.08 ? 130 + 10 * (sN / 0.08) : 140 + 72 * ((sN - 0.08) / 0.92);
+                const t = Math.min(1, sN / 0.12);
+                ramp = t * t * (3 - 2 * t);                                   // the stream lengthens smoothly right after the pin (no pop)
+            } else {
+                frame = 212 + 4 * Math.min(1, (y - POUR_J.S1) / vh);
+                ramp = 1;
+            }
+            pourPlayer.streamStretch = 1 + (stretchMax - 1) * ramp;
+            const camY = -(y - POUR_J.R1) / pxPerUnit;
+            const nowT = performance.now() * 0.001;
+            const dt = Math.min(0.1, Math.max(0.001, nowT - (POUR_J.lastT || nowT)));
+            POUR_J.lastT = nowT;
+            if (!POUR_J.wasActive) POUR_J.fs = frame;                     // snap on entry
+            POUR_J.fs += (frame - POUR_J.fs) * (1 - Math.exp(-dt * 9));
+            POUR_J.wasActive = true;
+            pourPlayer.setFrame(POUR_J.fs);
+            if (Math.abs(frame - POUR_J.fs) > 0.05) rwWake(120);          // keep rendering until the playback has caught up with the scroll
+            if (pourPlayer.mesh) {
+                const dd = y - POUR_J.S1;
+                const fade = dd <= 0.78 * vh ? 1 : 1 - Math.min(1, (dd - 0.78 * vh) / (0.17 * vh));
+                pourPlayer.mesh.material.opacity = fade;
+                if (fade < 0.01) pourPlayer.mesh.visible = false;
+            }
+            productGroup.visible = true;
+            productGroup.scale.set(1, 1, 1);
+            camera.position.y = camY;
+        }
+        if (typeof ScrollTrigger !== 'undefined') ScrollTrigger.addEventListener('refresh', computePourJourney);
+
+        // Section colour planes that live behind the canvas (document-positioned => they scroll natively with the page, zero lag)
+        const RW_BG_SECTIONS = [['rituals', '#E8EFE6'], ['transparency', '#0D241A']];   // the waterfall ends at the bottom edge of the bubble section
+        const rwFind = (id) => document.getElementById(id) || document.querySelector(id);
+        function syncStageBackgrounds() {
+            const host = document.getElementById('rw-bgs');
+            if (!host) return;
+            RW_BG_SECTIONS.forEach(([id, color]) => {
+                const sec = rwFind(id);
+                if (!sec) return;
+                let el = host.querySelector('[data-for="' + id + '"]');
+                if (!el) {
+                    el = document.createElement('div');
+                    el.className = 'rw-bg'; el.dataset.for = id; el.style.background = color;
+                    host.appendChild(el);
+                }
+                const r = sec.getBoundingClientRect();
+                el.style.top = (r.top + (window.scrollY || 0)) + 'px';
+                el.style.height = r.height + 'px';
+                if (id === 'transparency') {
+                    // the section's decorative backdrop (ambient light, vignette, dark floor gradient) belongs BEHIND the 3D layer,
+                    // otherwise it paints over the waterfall and makes it vanish at the end of the bubble section
+                    ['.formulation-bg-overlay', '.formulation-bg-floor'].forEach((sel) => {
+                        const d = document.querySelector(sel);
+                        if (d && d.parentNode !== el) el.appendChild(d);
+                    });
+                }
+            });
+        }
+        syncStageBackgrounds();
+        window.addEventListener('load', syncStageBackgrounds);
+        window.addEventListener('resize', syncStageBackgrounds);
+        if (typeof ScrollTrigger !== 'undefined') ScrollTrigger.addEventListener('refresh', syncStageBackgrounds);
+        if (typeof ResizeObserver !== 'undefined') {
+            const ro = new ResizeObserver(syncStageBackgrounds);
+            RW_BG_SECTIONS.forEach(([id]) => { const e = rwFind(id); if (e) ro.observe(e); });
+        }
+
+        // --- PERFORMANCE: skip GPU work when nothing changes, and adapt resolution to the device ---
+        const RW_PERF = { wakeUntil: 0, lastScroll: -1, ema: 16.7, lastRender: 0, lastAdapt: 0, pr: renderer.getPixelRatio(), prMax: renderer.getPixelRatio(), prMin: 1.0 };
+        function rwWake(ms) { RW_PERF.wakeUntil = Math.max(RW_PERF.wakeUntil, performance.now() + (ms || 900)); }
+        ['scroll', 'wheel', 'touchstart', 'touchmove', 'resize', 'keydown', 'pointerdown'].forEach((ev) => window.addEventListener(ev, () => rwWake(900), { passive: true }));
+        window.addEventListener('mousemove', () => rwWake(1200), { passive: true });
+        document.addEventListener('visibilitychange', () => rwWake(1500));
+        rwWake(5000);   // first seconds: models / textures still arriving
 
         function animate() {
             requestAnimationFrame(animate);
@@ -5738,7 +6040,27 @@
                 juiceMeshRoot.position.y = Math.max(-0.02, Math.min(0.02, verticalBob));
             }
 
+            updatePourJourney();
+            applyPourCameraX();
+            if (typeof shadowPlane !== 'undefined' && shadowPlane) shadowPlane.visible = !(pourPlayer && (pourPlayer.currentFrame || 1) > 90);   // ground shadow belongs to the upright bottle only
+
+            const nowMs = performance.now();
+            const scrolled = Math.abs(scrollY - RW_PERF.lastScroll) > 0.05;
+            RW_PERF.lastScroll = scrollY;
+            if (!(scrolled || heroFade > 0.001 || nowMs < RW_PERF.wakeUntil)) return;     // idle: nothing to draw
+
             renderer.render(scene, camera);
+
+            // adaptive pixel ratio: drop resolution when frames are slow, restore when there is headroom
+            const dtR = nowMs - RW_PERF.lastRender; RW_PERF.lastRender = nowMs;
+            if (dtR < 120) RW_PERF.ema += (dtR - RW_PERF.ema) * 0.06;
+            if (nowMs - RW_PERF.lastAdapt > 1500) {
+                let np = RW_PERF.pr;
+                if (RW_PERF.ema > 24 && RW_PERF.pr > RW_PERF.prMin) np = Math.max(RW_PERF.prMin, RW_PERF.pr - 0.25);
+                else if (RW_PERF.ema < 15 && RW_PERF.pr < RW_PERF.prMax && nowMs - RW_PERF.lastAdapt > 5000) np = Math.min(RW_PERF.prMax, RW_PERF.pr + 0.25);
+                if (np !== RW_PERF.pr) { RW_PERF.pr = np; renderer.setPixelRatio(np); renderer.setSize(window.innerWidth, window.innerHeight); RW_PERF.lastAdapt = nowMs; RW_PERF.ema = 16.7; }
+                else if (nowMs - RW_PERF.lastAdapt > 5000) RW_PERF.lastAdapt = nowMs;
+            }
         }
 
         // --- 9. REBUILT FOOTER MOTION & FORM VALIDATION ---

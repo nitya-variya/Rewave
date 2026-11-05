@@ -25,9 +25,12 @@ export class RewavePour {
       rigUrl: 'assets/pour/rewave_pour_rig.json',
       liquidUrl: 'assets/pour/liquid_frames',
       loadLiquid: false, // Disabled until liquid files exist (fail-soft)
+      deferLiquid: false,
       liquidMaterial: null,
       firstFrame: 1,
-      lastFrame: 240
+      lastFrame: 240,
+      streamStretch: 1,
+      worldScale: 1 // bottle scale / authoring scale (0.038): scales bottle travel + liquid together
     }, o);
 
     this.rig = null;
@@ -83,9 +86,18 @@ export class RewavePour {
       });
     }
 
-    // 3. Optional & Fail-soft Liquid Sequence Loader
+    if (this.loadLiquid && !this.deferLiquid) await this.loadLiquidSequence();
+
+    return this;
+  }
+
+
+  /** Optional, fail-soft liquid sequence download (called in idle time by the page). */
+  async loadLiquidSequence() {
+    const T = this.T;
+    if (this.mesh || !this.liquidUrl) return this;
     // Clearly marked integration point: assets/pour/liquid_frames (.json, .bin/.bin.gz)
-    if (this.loadLiquid && this.liquidUrl) {
+    {
       try {
         const metaRes = await fetch(this.liquidUrl + '.json');
         if (metaRes.ok) {
@@ -219,7 +231,8 @@ export class RewavePour {
       const bx = A.bottle.p[0] + (B.bottle.p[0] - A.bottle.p[0]) * t;
       const by = A.bottle.p[1] + (B.bottle.p[1] - A.bottle.p[1]) * t;
       const bz = A.bottle.p[2] + (B.bottle.p[2] - A.bottle.p[2]) * t;
-      this.productGroup.position.set(bx, by, bz);
+      const ws = this.worldScale;
+      this.productGroup.position.set(bx * ws, by * ws, bz * ws);
 
       // Bottle rotation (view-axis tilt quaternion)
       this._qBottle0.fromArray(A.bottle.q);
@@ -245,8 +258,10 @@ export class RewavePour {
     }
 
     // Liquid mesh sequence (if loaded)
+    if (this.mesh) this.mesh.scale.set(this.worldScale, this.worldScale * (this.streamStretch || 1), this.worldScale);   // stretch about the neck (y = 0)
     this._decodeLiquid(Math.round(fr));
 
+    this.currentFrame = fr;
     const camY = A.camY + (B.camY - A.camY) * t;
     return { frame: fr, camY };
   }
