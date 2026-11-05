@@ -1700,12 +1700,13 @@
             box-shadow: none !important;
             pointer-events: auto;
             box-sizing: border-box;
+            overflow: visible;
         }
 
         .formulation-capsules-stage {
             position: absolute;
             inset: 0;
-            overflow: hidden;
+            overflow: visible;
             pointer-events: auto;
         }
 
@@ -1953,7 +1954,7 @@
             .formulation-capsules-stage {
             position: absolute;
             inset: 0;
-            overflow: hidden;
+            overflow: visible;
             pointer-events: auto;
         }
             .formulation-bubble {
@@ -6567,8 +6568,8 @@
                         restitution: 0.35,
                         friction: 0.28
                     }),
-                    // Top boundary ceiling to contain tossed bubbles
-                    Bodies.rectangle(w / 2, -wallThick / 2 - 100, w + 400, wallThick, {
+                    // Top boundary ceiling to contain tossed bubbles (elevated so dropping bubbles enter freely)
+                    Bodies.rectangle(w / 2, -wallThick / 2 - 800, w + 400, wallThick, {
                         isStatic: true
                     })
                 ];
@@ -6589,6 +6590,7 @@
             // 5. Bubbles Pool & Dynamic Spawning (Staggered multi-layer drop)
             let bubbles = [];
             let activeDrag = null;
+            let hasDropped = false;
 
             function buildBubbles() {
                 // Clear existing bubbles
@@ -6597,6 +6599,11 @@
                     bubbles = [];
                 }
                 stage.innerHTML = '';
+                if (!hasDropped && !isReduced) {
+                    stage.style.opacity = '0';
+                } else {
+                    stage.style.opacity = '1';
+                }
 
                 currentIsMobile = window.innerWidth < 768;
                 const itemsData = currentIsMobile ? MOBILE_DATA : DESKTOP_DATA;
@@ -6622,9 +6629,9 @@
                     // Strictly clamp spawnX within container boundaries with safe inner margin
                     const spawnX = Math.max(radius + 24, Math.min(w - radius - 24, slotFrac * w + jitterX));
 
-                    // Drop smoothly from the upper chamber area
+                    // Drop from above the container (staggered in tiers from -60px to -360px)
                     const tier = Math.floor(idx / 4);
-                    const spawnY = -25 - (tier * (currentIsMobile ? 24 : 32)) - (Math.random() * 12);
+                    const spawnY = -60 - (tier * (currentIsMobile ? 55 : 75)) - (Math.random() * 25);
 
                     // Create perfectly circular rigid body in Matter.js
                     const body = Bodies.circle(spawnX, spawnY, radius, {
@@ -6635,15 +6642,12 @@
                         sleepThreshold: 45
                     });
 
-                    // Downward plunge with slight natural lateral velocity
-                    Body.setVelocity(body, {
-                        x: (Math.random() - 0.5) * (currentIsMobile ? 1.0 : 1.6),
-                        y: 3.2 + Math.random() * 2.2
-                    });
-                    Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.07);
-
                     Composite.add(engine.world, body);
-                    Sleeping.set(body, false);
+                    if (!hasDropped && !isReduced) {
+                        Sleeping.set(body, true);
+                    } else {
+                        Sleeping.set(body, false);
+                    }
 
                     // Apply initial position immediately
                     el.style.transform = `translate3d(${spawnX - radius}px, ${spawnY - radius}px, 0)`;
@@ -6662,6 +6666,27 @@
                 if (!currentIsMobile && !isReduced) {
                     attachPointerDrag();
                 }
+            }
+
+            function triggerDrop() {
+                if (hasDropped) return;
+                hasDropped = true;
+
+                if (stage) {
+                    stage.style.transition = 'opacity 0.25s ease';
+                    stage.style.opacity = '1';
+                }
+
+                bubbles.forEach(b => {
+                    Sleeping.set(b.body, false);
+                    Body.setVelocity(b.body, {
+                        x: (Math.random() - 0.5) * (currentIsMobile ? 1.0 : 1.6),
+                        y: 3.5 + Math.random() * 2.8
+                    });
+                    Body.setAngularVelocity(b.body, (Math.random() - 0.5) * 0.07);
+                });
+
+                startPhysics();
             }
 
             // 6. Interactive Desktop Dragging & Throwing (Preserves Page Scroll)
@@ -6762,7 +6787,7 @@
                 }
             }
 
-            // Build initial bubbles
+            // Build initial bubbles (staged above with opacity 0 until section enters viewport)
             buildBubbles();
 
             // 8. Viewport Visibility Observer & Entrance Choreography
@@ -6770,18 +6795,22 @@
                 const visObserver = new IntersectionObserver((entries) => {
                     entries.forEach(entry => {
                         if (entry.isIntersecting) {
-                            startPhysics();
+                            if (hasDropped) {
+                                startPhysics();
+                            } else {
+                                triggerDrop();
+                            }
                         } else {
                             pausePhysics();
                         }
                     });
-                }, { threshold: 0.08 });
+                }, { threshold: 0.05 });
                 visObserver.observe(sec);
             } else if (!isReduced) {
-                startPhysics();
+                triggerDrop();
             }
 
-            // GSAP Title & Ingredient Index Reveal on First Scroll Entry
+            // GSAP Title & Ingredient Index Reveal + Dynamic Bubble Drop on Scroll Entry
             if (typeof gsap !== 'undefined' && typeof ScrollTrigger !== 'undefined' && !isReduced) {
                 let revealed = false;
                 ScrollTrigger.create({
@@ -6798,6 +6827,7 @@
                                 ease: 'power2.out'
                             });
                         }
+                        triggerDrop();
                     }
                 });
             }
@@ -6817,6 +6847,9 @@
                     createTitleObstacle();
                     if (breakpointChanged) {
                         buildBubbles();
+                        if (hasDropped) {
+                            triggerDrop();
+                        }
                     }
                     const sRect = sec.getBoundingClientRect();
                     if (sRect.top < window.innerHeight && sRect.bottom > 0) {
